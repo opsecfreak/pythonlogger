@@ -1,26 +1,21 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <title>Temperature Viewer</title>
-</head>
+<head><title>Temp by ZIP</title></head>
 <body>
-    <h1>Temperature Graph by ZIP Code</h1>
-    <form method="POST">
-        ZIP Code: <input type="text" name="zip" required><br>
-        Start Date: <input type="date" name="start" required><br>
-        End Date: <input type="date" name="end" required><br>
-        <input type="submit" value="Get Data">
-    </form>
+<h1>Temperature Tracker</h1>
+<form method="POST">
+ ZIP: <input name="zip" required> &nbsp;
+ Start: <input type="date" name="start" required>
+ End: <input type="date" name="end" required>
+ <button>Show</button>
+</form>
 
-    {% if error %}
-        <p style="color:red;">{{ error }}</p>
-    {% endif %}
-
-    {% if request.method == 'POST' %}
-        <h2>Graph</h2>
-        <img src="/" alt="Temperature Graph">
-        <br><br>
-        <a href="/data.csv">Download CSV</a>
-    {% endif %}
+{% if error %}
+ <p style="color:red">{{ error }}</p>
+{% endif %}
+{% if request.method=='POST' %}
+ <img src="/" alt="Temp graph"><br>
+ <a href="/data.csv">Download stored data (CSV)</a>
+{% endif %}
 </body>
 </html>

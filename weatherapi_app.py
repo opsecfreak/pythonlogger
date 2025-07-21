@@ -1,84 +1,65 @@
-from flask import Flask, render_template, request, send_file
-import requests
-import pandas as pd
-import matplotlib.pyplot as plt
-import io
-import os
-from datetime import datetime, timedelta
-
+from flask import Flask, render_template, request, Response, send_file
+import requests, pandas as pd, matplotlib.pyplot as plt
+import io, os
+from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+# weatherapi_app.py
 app = Flask(__name__)
-
 DATA_FILE = 'temperature_data.csv'
+VC_KEY = os.getenv("VC_API_KEY")  # set this in Codespaces secrets
 
-# Ensure data file exists
+# Ensure CSV exists
 if not os.path.exists(DATA_FILE):
-    df_init = pd.DataFrame(columns=["zip", "date", "temperature"])
-    df_init.to_csv(DATA_FILE, index=False)
+    pd.DataFrame(columns=["zip","date","temp_max"]).to_csv(DATA_FILE, index=False)
 
-# Fetch historical temperature data from Open-Meteo
-def fetch_temperature_data(zip_code, start_date, end_date):
-    location_url = f"https://geocoding-api.open-meteo.com/v1/search?postal_code={zip_code}&country=US"
-    location_res = requests.get(location_url).json()
-    
-    if "results" not in location_res:
-        return None, None, None
-
-    lat = location_res['results'][0]['latitude']
-    lon = location_res['results'][0]['longitude']
-    city = location_res['results'][0]['name']
-
+def fetch_vc_data(zip_code, start_date, end_date):
     url = (
-        f"https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lon}"
-        f"&start_date={start_date}&end_date={end_date}&daily=temperature_2m_max&temperature_unit=fahrenheit&timezone=auto"
+        f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/"
+        f"{zip_code}/{start_date}/{end_date}"
+        f"?unitGroup=us&elements=datetime,tempmax&include=days&key={VC_KEY}&contentType=json"
     )
-    response = requests.get(url)
-    data = response.json()
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        return None, None, resp.text
 
-    if 'daily' not in data:
-        return None, None, None
+    j = resp.json()
+    city = j.get("address", zip_code)
+    days = j.get("days", [])
+    dates = [d["datetime"] for d in days]
+    temps = [d["tempmax"] for d in days]
 
-    dates = data['daily']['time']
-    temps = data['daily']['temperature_2m_max']
-    
     # Save to CSV
     df = pd.read_csv(DATA_FILE)
-    for d, t in zip(dates, temps):
-        df = df.append({"zip": zip_code, "date": d, "temperature": t}, ignore_index=True)
+    new = pd.DataFrame({"zip":zip_code,"date":dates,"temp_max":temps})
+    df = pd.concat([df, new]).drop_duplicates(subset=["zip","date"], keep="last")
     df.to_csv(DATA_FILE, index=False)
 
     return dates, temps, city
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route("/", methods=["GET","POST"])
 def index():
-    if request.method == 'POST':
-        zip_code = request.form['zip']
-        start = request.form['start']
-        end = request.form['end']
-
-        dates, temps, city = fetch_temperature_data(zip_code, start, end)
+    if request.method=="POST":
+        z = request.form["zip"]
+        s = request.form["start"]
+        e = request.form["end"]
+        dates, temps, location_or_err = fetch_vc_data(z, s, e)
         if dates is None:
-            return render_template('index.html', error="Could not retrieve data.")
-        
-        # Plot
-        fig, ax = plt.subplots()
-        ax.plot(dates, temps, marker='o')
-        ax.set_title(f"Max Daily Temperature in {city} ({zip_code})")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Temp (°F)")
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
+            return render_template("index.html", error=f"Error: {location_or_err}")
         buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        plt.close(fig)
+        plt.figure(figsize=(8,4))
+        plt.plot(dates, temps, marker="o")
+        plt.title(f"Max Daily Temp for {location_or_err}")
+        plt.xlabel("Date"); plt.ylabel("Temp (°F)")
+        plt.xticks(rotation=45); plt.tight_layout()
+        plt.savefig(buf, format="png"); plt.close()
         buf.seek(0)
-        return Response(buf.getvalue(), mimetype='image/png')
+        return Response(buf.getvalue(), mimetype="image/png")
+    return render_template("weatherhtml.html")
 
-    return render_template('weatherhtml.html')
-
-@app.route('/data.csv')
-def get_csv():
+@app.route("/data.csv")
+def download_csv():
     return send_file(DATA_FILE, as_attachment=True)
 
-if __name__ == '__main__':
+if __name__=="__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
